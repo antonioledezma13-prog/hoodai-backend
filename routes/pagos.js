@@ -45,8 +45,8 @@ router.post('/crear-orden', auth, async (req, res) => {
           description: descripcion,
         }],
         application_context: {
-          return_url: `${process.env.FRONTEND_URL}/pago-exitoso`,
-          cancel_url: `${process.env.FRONTEND_URL}/suscripcion`,
+          return_url: process.env.FRONTEND_URL + '/pago-exitoso?tipo=' + tipo,
+          cancel_url: process.env.FRONTEND_URL + '/pago-cancelado',
         },
       }),
     });
