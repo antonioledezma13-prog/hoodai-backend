@@ -13,6 +13,7 @@ const repuestosRoutes    = require('./routes/repuestos');
 const pagosRoutes        = require('./routes/pagos');
 const seguroRoutes       = require('./routes/seguro');
 const ensambladoraRoutes = require('./routes/ensambladora');
+const valoracionRoutes   = require('./routes/valoracion');
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use('/api/repuestos',    repuestosRoutes);
 app.use('/api/pagos',        pagosRoutes);
 app.use('/api/seguro',       seguroRoutes);
 app.use('/api/ensambladora', ensambladoraRoutes);
+app.use('/api/valoracion',   valoracionRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
