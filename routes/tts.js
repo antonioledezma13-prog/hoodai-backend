@@ -19,6 +19,18 @@ router.post('/', auth, async (req, res) => {
     if (!ELEVENLABS_API_KEY)
       return res.status(500).json({ error: 'ElevenLabs no configurado en el servidor' });
 
+    // Limpiar markdown antes de enviar a ElevenLabs
+    const cleanText = textLimited
+      .replace(/\*\*(.*?)\*\*/g, '$1')   // **negrita**
+      .replace(/\*(.*?)\*/g, '$1')       // *cursiva*
+      .replace(/#{1,6}\s/g, '')          // # encabezados
+      .replace(/`{1,3}[^`]*`{1,3}/g, '') // `código`
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1') // [links](url)
+      .replace(/[-•]\s/g, '')            // listas con guión o bullet
+      .replace(/\n{2,}/g, '. ')          // saltos dobles → pausa
+      .replace(/\n/g, ' ')              // saltos simples → espacio
+      .trim();
+
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
       method: 'POST',
       headers: {
@@ -27,7 +39,7 @@ router.post('/', auth, async (req, res) => {
         'Accept':       'audio/mpeg',
       },
       body: JSON.stringify({
-        text: textLimited,
+        text: cleanText,
         model_id: 'eleven_turbo_v2_5',
         voice_settings: {
           stability:        0.4,
