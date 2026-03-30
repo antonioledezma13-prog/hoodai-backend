@@ -10,7 +10,7 @@ const Repuesto  = require('../models/Repuesto');
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Modelo oficial estable para evitar el error 404
-const MODEL_NAME = "claude-3-5-sonnet-20241022";
+const MODEL_NAME = "claude-3-haiku-20240307";
 
 // Detección de keywords
 const GRUA_KEYWORDS = [
