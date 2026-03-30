@@ -14,6 +14,7 @@ const pagosRoutes        = require('./routes/pagos');
 const seguroRoutes       = require('./routes/seguro');
 const ensambladoraRoutes = require('./routes/ensambladora');
 const valoracionRoutes   = require('./routes/valoracion');
+const ttsRoutes          = require('./routes/tts');
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.use('/api/pagos',        pagosRoutes);
 app.use('/api/seguro',       seguroRoutes);
 app.use('/api/ensambladora', ensambladoraRoutes);
 app.use('/api/valoracion',   valoracionRoutes);
+app.use('/api/tts',          ttsRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

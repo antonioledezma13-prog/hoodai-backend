@@ -1,10 +1,14 @@
 const mongoose = require('mongoose');
 const bcrypt   = require('bcryptjs');
 
-const PLAN_LIMITS = { free: 3, paid: 25 };
-const PLAN_PRICES = {
+const PLAN_LIMITS  = { free: 3, paid: 25, gold: 100 };
+const PLAN_PRICES  = {
   usuario: 6, taller: 3, grua: 3,
   repuestos: 3, ensambladora: 3, seguro: 3,
+};
+const PLAN_PRICES_GOLD = {
+  usuario: 30, taller: 20, grua: 20,
+  repuestos: 20, ensambladora: 20, seguro: 20,
 };
 
 const userSchema = new mongoose.Schema({
@@ -22,7 +26,7 @@ const userSchema = new mongoose.Schema({
   // Ensambladora
   marcasVehiculo: [{ type: String }], // marcas que representa
   // Plan y usos
-  plan:              { type: String, enum: ['free', 'paid'], default: 'free' },
+  plan:              { type: String, enum: ['free', 'paid', 'gold'], default: 'free' },
   usosRestantes:     { type: Number, default: 3 },
   usosExtra:         { type: Number, default: 0 },
   planExpira:        { type: Date, default: null },
@@ -50,6 +54,16 @@ userSchema.methods.activarPlan = async function(paypalOrderId, meses = 1) {
   await this.save();
 };
 
+userSchema.methods.activarPlanGold = async function(paypalOrderId, meses = 1) {
+  this.plan = 'gold';
+  this.usosRestantes = PLAN_LIMITS.gold;
+  this.paypalOrderId = paypalOrderId;
+  const expira = new Date();
+  expira.setMonth(expira.getMonth() + meses);
+  this.planExpira = expira;
+  await this.save();
+};
+
 userSchema.methods.agregarUsosExtra = async function(cantidad, paypalOrderId) {
   this.usosExtra += cantidad;
   this.paypalOrderId = paypalOrderId;
@@ -67,5 +81,6 @@ userSchema.methods.comparePassword = function(plain) {
 };
 
 module.exports = mongoose.model('User', userSchema);
-module.exports.PLAN_LIMITS = PLAN_LIMITS;
-module.exports.PLAN_PRICES = PLAN_PRICES;
+module.exports.PLAN_LIMITS      = PLAN_LIMITS;
+module.exports.PLAN_PRICES      = PLAN_PRICES;
+module.exports.PLAN_PRICES_GOLD = PLAN_PRICES_GOLD;
