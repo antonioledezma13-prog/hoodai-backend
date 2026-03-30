@@ -40,11 +40,15 @@ router.post('/', auth, checkUsos, async (req, res) => {
 
     let contextLines = "";
     if (vehicleId) {
-      const v = await Vehicle.findOne({ _id: vehicleId, userId: req.user._id });
-      if (v) contextLines = "Vehículo: " + v.year + " " + v.make + " " + v.model;
+      try {
+        const v = await Vehicle.findOne({ _id: vehicleId, userId: req.user._id });
+        if (v) contextLines = "Vehiculo: " + v.make + " " + v.model;
+      } catch (err) {
+        console.log("Error buscando vehiculo");
+      }
     }
 
-    const systemPrompt = "Eres Hoodai. Asistente mecánico profesional. Responde siempre en texto plano. Prohibido usar negritas, cursivas, guiones o viñetas. Sin Markdown.";
+    const systemPrompt = "Eres Hoodai. Asistente mecanico profesional. Responde siempre en texto plano. Prohibido usar negritas, cursivas, guiones o viñetas. Sin Markdown.";
 
     const response = await client.messages.create({
       model: MODEL_NAME,
@@ -63,7 +67,10 @@ router.post('/', auth, checkUsos, async (req, res) => {
     const sugierTaller = needsTaller(message) || needsTaller(reply);
     const sugierRepuesto = needsRepuesto(message) || needsRepuesto(reply);
 
-    if (req.user.consumirUso) await req.user.consumirUso();
+    // Manejo seguro de la funcion de consumo
+    if (req.user && typeof req.user.consumirUso === 'function') {
+      await req.user.consumirUso();
+    }
 
     const uRestantes = req.user.usosRestantes || 0;
     const uExtra = req.user.usosExtra || 0;
@@ -77,14 +84,15 @@ router.post('/', auth, checkUsos, async (req, res) => {
     });
 
   } catch (e) {
-    res.status(500).json({ error: "Error en el servidor" });
+    console.error("Detalle del error:", e.message);
+    res.status(500).json({ error: "Error en el servidor: " + e.message });
   }
 });
 
 router.post('/solicitar-grua', auth, async (req, res) => {
   try {
     const gruas = await User.find({ role: 'grua' }).limit(1);
-    if (!gruas.length) return res.status(404).json({ error: 'No hay grúas' });
+    if (!gruas.length) return res.status(404).json({ error: 'No hay gruas' });
     res.json({ grua: { nombre: gruas[0].businessName || gruas[0].name, telefono: gruas[0].phone } });
   } catch (e) {
     res.status(500).json({ error: "Error grua" });
