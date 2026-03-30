@@ -11,9 +11,9 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const MODEL_NAME = "claude-3-5-sonnet-latest";
 
-const GRUA_KEYWORDS = ['grúa','grua','remolque','remolcar','varado','no arranca','emergencia','auxilio'];
-const TALLER_KEYWORDS = ['taller','mecánico','mecanico','reparar','falla','revisión','mantenimiento'];
-const REPUESTO_KEYWORDS = ['repuesto','pieza','parte','correa','batería','bateria','bomba','filtro'];
+const GRUA_KEYWORDS = ['grúa','grua','remolque','remolcar','jalón','jalar','arrastrar','varado','no arranca','emergencia','auxilio'];
+const TALLER_KEYWORDS = ['taller','mecánico','mecanico','reparar','reparación','arreglar','falla','revisión','diagnóstico','mantenimiento'];
+const REPUESTO_KEYWORDS = ['repuesto','pieza','parte','correa','filtro','bujía','alternador','batería','bomba','radiador','sensor'];
 
 function needsGrua(text) { return GRUA_KEYWORDS.some(k => text.toLowerCase().includes(k)); }
 function needsTaller(text) { return TALLER_KEYWORDS.some(k => text.toLowerCase().includes(k)); }
@@ -65,12 +65,15 @@ router.post('/', auth, checkUsos, async (req, res) => {
 
     if (req.user.consumirUso) await req.user.consumirUso();
 
+    const uRestantes = req.user.usosRestantes || 0;
+    const uExtra = req.user.usosExtra || 0;
+
     res.json({
       reply: reply,
       sugierGrua: sugierGrua,
       sugierTaller: sugierTaller,
       sugierRepuesto: sugierRepuesto,
-      usosRestantes: (req.user.usosRestantes  0) + (req.user.usosExtra  0)
+      usosRestantes: uRestantes + uExtra
     });
 
   } catch (e) {
@@ -98,7 +101,7 @@ router.post('/buscar-taller', auth, async (req, res) => {
 });
 
 router.post('/buscar-repuesto', auth, async (req, res) => {
-try {
+  try {
     const { piezaTexto } = req.body;
     const pieza = await extractPieza(piezaTexto || '');
     const tiendas = await User.find({ role: 'repuestos' }).limit(1);
