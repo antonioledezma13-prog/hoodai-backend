@@ -32,6 +32,15 @@ const Valoracion = mongoose.models.Valoracion || mongoose.model('Valoracion', va
 // POST /api/valoracion — crear nueva valoración vehicular con IA
 router.post('/', auth, checkUsos, async (req, res) => {
   try {
+    // Solo plan gold
+    if (req.user.plan !== 'gold')
+      return res.status(403).json({ error: 'La Valoración Vehicular está disponible solo en el Plan Oro 🥇' });
+
+    // Solo usuarios conductores y seguros
+    const rolesPermitidos = ['usuario', 'seguro'];
+    if (!rolesPermitidos.includes(req.user.role))
+      return res.status(403).json({ error: 'Esta función es exclusiva para conductores y aseguradoras.' });
+
     const {
       vehicleId,
       estadoMecanico,
