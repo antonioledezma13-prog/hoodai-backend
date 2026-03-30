@@ -9,6 +9,11 @@ const Repuesto  = require('../models/Repuesto');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Usa el modelo correcto para evitar errores de API
+const MODEL_NAME = "claude-3-5-sonnet-latest";
+
+// ── Detección de keywords ──────────────────────────────────────────────────
+
 const GRUA_KEYWORDS = [
   'grúa','grua','remolque','remolcar','jalón','jalar','arrastrar',
   'varado','varada','no arranca','no enciende','accidente','choque',
@@ -40,20 +45,20 @@ function needsRepuesto(text){ const l = text.toLowerCase(); return REPUESTO_KEYW
 
 async function extractPieza(message) {
   try {
-    const promptText = 'Extrae el nombre de la pieza automotriz de este texto: ' + message;
     const r = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022', 
+      model: MODEL_NAME, 
       max_tokens: 20,
-      messages: [{ 
-        role: 'user', 
-        content: promptText
-      }]
+      messages: [{ role: 'user', content:
+        Del texto: "${message}"\nExtrae SOLO el nombre de la pieza automotriz. Si no hay ninguno, responde "repuesto".
+      }],
     });
     return r.content[0].text.trim().toLowerCase();
-  } catch (e) {
+  } catch {
     return 'repuesto';
   }
 }
+
+// ── POST /api/chat ─────────────────────────────────────────────────────────
 
 router.post('/', auth, checkUsos, async (req, res) => {
   try {
@@ -66,87 +71,97 @@ router.post('/', auth, checkUsos, async (req, res) => {
     if (vehicleId) {
       const v = await Vehicle.findOne({ _id: vehicleId, userId: req.user._id });
       if (v) {
-        contextLines.push('Vehiculo: ' + v.year + ' ' + v.make + ' ' + v.model);
+        contextLines.push(Vehículo: ${v.year} ${v.make} ${v.model}.);
       }
     }
 
     if (scanId) {
       const scan = await Scan.findOne({ _id: scanId, userId: req.user._id });
-      if (scan && scan.summary) {
-        contextLines.push('Escaneo: ' + scan.summary);
+      if (scan?.parts?.length) {
+        contextLines.push(Escaneo detectó: ${scan.summary});
       }
     }
 
-    const systemPrompt = 'Eres Hoodai. Asistente mecanico profesional. Contexto: ' + contextLines.join('. ') + '. Responde siempre en texto plano. Prohibido usar negritas, cursivas, guiones o viñetas. Sin Markdown.';
-
-    const messages = [
-      ...history.slice(-5).map(h => ({ role: h.role, content: h.content })),
-      { role: 'user', content: message }
-    ];
+    const systemPrompt =
+      Eres Hoodai — Tu aliado en asesorías mecánicas.\n +
+      Responde SIEMPRE en texto plano. Prohibido usar negritas, cursivas, guiones o viñetas. Sin Markdown.\n +
+      Contexto: ${contextLines.join(' ')};
 
     const response = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022', 
+      model: MODEL_NAME, 
       max_tokens: 512,
-      system: systemPrompt, 
-      messages
+      system: systemPrompt,
+      messages: [
+        ...history.slice(-5).map(h => ({ role: h.role, content: h.content })),
+        { role: 'user', content: message }
+      ],
     });
 
     let reply = response.content[0].text;
+    // Limpieza de seguridad para texto plano
     reply = reply.replace(/\*\*|\*|__/g, '').replace(/^- /gm, '').replace(/^#+ /gm, '');
-
+    
     const sugierGrua     = needsGrua(message)     || needsGrua(reply);
     const sugierTaller   = needsTaller(message)    || needsTaller(reply);
     const sugierRepuesto = needsRepuesto(message)  || needsRepuesto(reply);
 
-await req.user.consumirUso();
+    if (req.user.consumirUso) await req.user.consumirUso();
+
     res.json({
-      reply, 
-      sugierGrua, 
-      sugierTaller, 
-      sugierRepuesto,
-      usosRestantes: req.user.usosRestantes + req.user.usosExtra
+      reply, sugierGrua, sugierTaller, sugierRepuesto,
+      usosRestantes: (req.user.usosRestantes  0) + (req.user.usosExtra  0),
     });
 
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('Chat error:', e);
+    res.status(500).json({ error: 'Error al procesar el chat' });
   }
 });
+
+// ── POST /api/chat/solicitar-grua ──────────────────────────────────────────
 
 router.post('/solicitar-grua', auth, async (req, res) => {
   try {
     const gruas = await User.find({ role: 'grua', disponible: true }).limit(1);
-    if (!gruas.length) return res.status(404).json({ error: 'No hay gruas disponibles.' });
-    
+    if (!gruas.length) return res.status(404).json({ error: 'No hay grúas disponibles.' });
+
     res.json({
       grua: { nombre: gruas[0].businessName || gruas[0].name, telefono: gruas[0].phone },
-      mensaje: 'Grua asignada: ' + (gruas[0].businessName || gruas[0].name)
+      mensaje: 🚛 Grúa asignada: ${gruas[0].businessName || gruas[0].name}.,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ── POST /api/chat/buscar-taller ───────────────────────────────────────────
 
 router.post('/buscar-taller', auth, async (req, res) => {
   try {
     const talleres = await User.find({ role: 'taller' }).limit(1);
+    if (!talleres.length) return res.status(404).json({ error: 'No hay talleres.' });
+
     res.json({
       taller: { nombre: talleres[0].businessName || talleres[0].name, telefono: talleres[0].phone },
-      mensaje: 'Taller encontrado: ' + (talleres[0].businessName || talleres[0].name)
+      mensaje: 🔧 Taller encontrado: ${talleres[0].businessName || talleres[0].name}.,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
+// ── POST /api/chat/buscar-repuesto ─────────────────────────────────────────
+
 router.post('/buscar-repuesto', auth, async (req, res) => {
   try {
     const { piezaTexto } = req.body;
-    const pieza = await extractPieza(piezaTexto || 'repuesto');
+    const pieza = await extractPieza(piezaTexto || '');
     const tiendas = await User.find({ role: 'repuestos' }).limit(1);
+    
     res.json({
-      tienda: { nombre: tiendas[0].businessName || tiendas[0].name, telefono: tiendas[0].phone },
+      tienda: { nombre: tiendas[0]?.businessName  tiendas[0]?.name  'Tienda HoodAI', telefono: tiendas[0]?.phone || 'N/D' },
       pieza,
-      mensaje: 'Consulta por ' + pieza + ' en ' + (tiendas[0].businessName || tiendas[0].name)
+      mensaje: 🛒 Consulta disponibilidad de ${pieza} en tienda.,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
