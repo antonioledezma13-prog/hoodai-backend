@@ -9,7 +9,7 @@ const Repuesto  = require('../models/Repuesto');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const MODEL_NAME = "claude-3-5-sonnet-latest";
+const MODEL_NAME = "claude-3-5-sonnet-20240620";
 
 const GRUA_KEYWORDS = ['grúa','grua','remolque','remolcar','jalón','jalar','arrastrar','varado','no arranca','emergencia','auxilio'];
 const TALLER_KEYWORDS = ['taller','mecánico','mecanico','reparar','reparación','arreglar','falla','revisión','diagnóstico','mantenimiento'];
@@ -67,7 +67,6 @@ router.post('/', auth, checkUsos, async (req, res) => {
     const sugierTaller = needsTaller(message) || needsTaller(reply);
     const sugierRepuesto = needsRepuesto(message) || needsRepuesto(reply);
 
-    // Manejo seguro de la funcion de consumo
     if (req.user && typeof req.user.consumirUso === 'function') {
       await req.user.consumirUso();
     }
@@ -84,8 +83,7 @@ router.post('/', auth, checkUsos, async (req, res) => {
     });
 
   } catch (e) {
-    console.error("Detalle del error:", e.message);
-    res.status(500).json({ error: "Error en el servidor: " + e.message });
+    res.status(500).json({ error: "Error de API: " + e.message });
   }
 });
 
