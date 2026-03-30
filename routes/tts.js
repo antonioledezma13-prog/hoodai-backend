@@ -13,22 +13,23 @@ router.post('/', auth, async (req, res) => {
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: 'text requerido' });
 
-    // Limitar longitud para no gastar créditos en textos muy largos
-    const textLimited = text.slice(0, 500);
-
     if (!ELEVENLABS_API_KEY)
       return res.status(500).json({ error: 'ElevenLabs no configurado en el servidor' });
 
-    // Limpiar markdown antes de enviar a ElevenLabs
-    const cleanText = textLimited
-      .replace(/\*\*(.*?)\*\*/g, '$1')   // **negrita**
-      .replace(/\*(.*?)\*/g, '$1')       // *cursiva*
-      .replace(/#{1,6}\s/g, '')          // # encabezados
-      .replace(/`{1,3}[^`]*`{1,3}/g, '') // `código`
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1') // [links](url)
-      .replace(/[-•]\s/g, '')            // listas con guión o bullet
-      .replace(/\n{2,}/g, '. ')          // saltos dobles → pausa
-      .replace(/\n/g, ' ')              // saltos simples → espacio
+    // Limpieza agresiva de markdown antes de enviar a ElevenLabs
+    const cleanText = text
+      .slice(0, 500)
+      .replace(/\*{1,3}(.*?)\*{1,3}/g, '$1')   // *x* **x** ***x***
+      .replace(/\*/g, '')                        // cualquier * suelto restante
+      .replace(/_{1,2}(.*?)_{1,2}/g, '$1')      // _x_ __x__
+      .replace(/#{1,6}\s*/g, '')                 // # encabezados
+      .replace(/`{1,3}[^`]*`{1,3}/g, '')        // `código`
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')        // [links](url)
+      .replace(/^\s*[-•>]\s*/gm, '')             // listas y citas
+      .replace(/^\s*\d+\.\s*/gm, '')             // listas numeradas
+      .replace(/\n{2,}/g, '. ')                  // saltos dobles → pausa natural
+      .replace(/\n/g, ' ')                       // saltos simples → espacio
+      .replace(/\s{2,}/g, ' ')                   // espacios múltiples
       .trim();
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
