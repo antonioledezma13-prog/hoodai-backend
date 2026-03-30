@@ -11,9 +11,9 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const MODEL_NAME = "claude-3-5-sonnet-latest";
 
-const GRUA_KEYWORDS = ['grúa','grua','remolque','remolcar','jalón','jalar','arrastrar','varado','no arranca','emergencia','auxilio'];
-const TALLER_KEYWORDS = ['taller','mecánico','mecanico','reparar','reparación','arreglar','falla','revisión','diagnóstico','mantenimiento'];
-const REPUESTO_KEYWORDS = ['repuesto','pieza','parte','correa','filtro','bujía','alternador','batería','bomba','radiador','sensor'];
+const GRUA_KEYWORDS = ['grúa','grua','remolque','remolcar','varado','no arranca','emergencia','auxilio'];
+const TALLER_KEYWORDS = ['taller','mecánico','mecanico','reparar','falla','revisión','mantenimiento'];
+const REPUESTO_KEYWORDS = ['repuesto','pieza','parte','correa','batería','bateria','bomba','filtro'];
 
 function needsGrua(text) { return GRUA_KEYWORDS.some(k => text.toLowerCase().includes(k)); }
 function needsTaller(text) { return TALLER_KEYWORDS.some(k => text.toLowerCase().includes(k)); }
@@ -21,7 +21,7 @@ function needsRepuesto(text) { return REPUESTO_KEYWORDS.some(k => text.toLowerCa
 
 async function extractPieza(message) {
   try {
-    const prompt = "Extrae solo el nombre de la pieza de este mensaje: " + message + ". Si no hay, responde repuesto.";
+    const prompt = "Extrae el nombre de la pieza de: " + message;
     const r = await client.messages.create({
       model: MODEL_NAME,
       max_tokens: 20,
@@ -35,13 +35,13 @@ async function extractPieza(message) {
 
 router.post('/', auth, checkUsos, async (req, res) => {
   try {
-    const { message, vehicleId, scanId, history = [] } = req.body;
+    const { message, vehicleId, history = [] } = req.body;
     if (!message) return res.status(400).json({ error: 'message required' });
 
-    let contextLines = [];
+    let contextLines = "";
     if (vehicleId) {
       const v = await Vehicle.findOne({ _id: vehicleId, userId: req.user._id });
-      if (v) contextLines.push("Vehículo: " + v.year + " " + v.make + " " + v.model);
+      if (v) contextLines = "Vehículo: " + v.year + " " + v.make + " " + v.model;
     }
 
     const systemPrompt = "Eres Hoodai. Asistente mecánico profesional. Responde siempre en texto plano. Prohibido usar negritas, cursivas, guiones o viñetas. Sin Markdown.";
@@ -66,25 +66,25 @@ router.post('/', auth, checkUsos, async (req, res) => {
     if (req.user.consumirUso) await req.user.consumirUso();
 
     res.json({
-      reply,
-      sugierGrua,
-      sugierTaller,
-      sugierRepuesto,
+      reply: reply,
+      sugierGrua: sugierGrua,
+      sugierTaller: sugierTaller,
+      sugierRepuesto: sugierRepuesto,
       usosRestantes: (req.user.usosRestantes  0) + (req.user.usosExtra  0)
     });
 
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "Error en el servidor" });
   }
 });
 
 router.post('/solicitar-grua', auth, async (req, res) => {
   try {
-    const gruas = await User.find({ role: 'grua', disponible: true }).limit(1);
+    const gruas = await User.find({ role: 'grua' }).limit(1);
     if (!gruas.length) return res.status(404).json({ error: 'No hay grúas' });
     res.json({ grua: { nombre: gruas[0].businessName || gruas[0].name, telefono: gruas[0].phone } });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "Error grua" });
   }
 });
 
@@ -93,18 +93,18 @@ router.post('/buscar-taller', auth, async (req, res) => {
     const talleres = await User.find({ role: 'taller' }).limit(1);
     res.json({ taller: { nombre: talleres[0].businessName || talleres[0].name, telefono: talleres[0].phone } });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "Error taller" });
   }
 });
 
 router.post('/buscar-repuesto', auth, async (req, res) => {
-  try {
+try {
     const { piezaTexto } = req.body;
     const pieza = await extractPieza(piezaTexto || '');
     const tiendas = await User.find({ role: 'repuestos' }).limit(1);
-    res.json({ tienda: { nombre: tiendas[0]?.businessName || tiendas[0]?.name, telefono: tiendas[0]?.phone }, pieza });
+    res.json({ tienda: { nombre: tiendas[0]?.businessName || tiendas[0]?.name, telefono: tiendas[0]?.phone }, pieza: pieza });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "Error repuesto" });
   }
 });
 
