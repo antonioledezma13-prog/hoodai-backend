@@ -123,6 +123,13 @@ router.post('/', auth, checkUsos, async (req, res) => {
         `\nSi el usuario menciona una pieza específica, indícale que use el botón "🛒 Buscar Repuesto" para localizar la tienda con esa pieza en stock.`
       : `\n\nNo hay tiendas de repuestos HoodAI registradas aún.`;
 
+    const LANG_NAMES = {
+      es:'español', en:'English', fr:'français', ru:'русский',
+      tr:'Türkçe', pt:'português', ar:'العربية', ja:'日本語',
+      zh:'中文', de:'Deutsch',
+    };
+    const langName = LANG_NAMES[lang] || 'español';
+
     const roleContext = {
       usuario:   'El usuario es un conductor normal que necesita orientación mecánica clara y sencilla.',
       taller:    'El usuario es un taller mecánico. Puede usar lenguaje técnico. Ayúdalo con diagnósticos avanzados.',
@@ -135,7 +142,9 @@ router.post('/', auth, checkUsos, async (req, res) => {
       `${roleContext[role] || roleContext.usuario}\n` +
       `${contextLines.join(' ')}\n` +
       gruaContext + tallerContext + repuestoContext +
-      `\nTono: ejecutivo, calmado, pedagógico. Respuestas concisas.\n` +
+      `\nIMPORTANTE: Responde SIEMPRE en ${langName}. Sin importar en qué idioma llegue el mensaje, tu respuesta debe estar completamente en ${langName}.\n` +
+      `FORMATO OBLIGATORIO: Responde SIEMPRE en texto plano. NUNCA uses asteriscos, guiones, numeraciones, negritas, cursivas ni ningún símbolo de markdown. Escribe en párrafos simples como si hablaras en voz alta.\n` +
+      `Tono: ejecutivo, calmado, pedagógico. Respuestas concisas.\n` +
       `Cuando el usuario mencione una pieza o repuesto específico, nómbrala claramente en tu respuesta para que el sistema pueda buscarla.`;
 
     const messages = [
