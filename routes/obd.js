@@ -117,7 +117,9 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
     });
 
     // Decodificar códigos DTC
-    const dtcDecodificados = codigosDTC ? decodeDTC(codigosDTC) : [];
+    const dtcDecodificados   = codigosDTC              ? decodeDTC(codigosDTC)              : [];
+    const dtcPendientesDecod = req.body.dtcPendientes  ? decodeDTC(req.body.dtcPendientes)  : [];
+    const dtcHistorialDecod  = req.body.dtcHistorial   ? decodeDTC(req.body.dtcHistorial)   : [];
 
     // Construir resumen para la IA
     const resumenLecturas = lecturasTrad.length > 0
@@ -191,6 +193,8 @@ Responde SOLO con este JSON sin markdown:
     res.json({
       ...parsed,
       dtcDecodificados,
+      dtcPendientesDecod,
+      dtcHistorialDecod,
       lecturasTrad: (lecturas || []).map(l => translatePID(l.pid, l.hex)).filter(Boolean),
       usosRestantes: req.user.usosRestantes + req.user.usosExtra,
     });
