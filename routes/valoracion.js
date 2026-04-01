@@ -7,7 +7,6 @@ const mongoose  = require('mongoose');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// Schema simple inline para guardar valoraciones
 const valoracionSchema = new mongoose.Schema({
   userId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   vehicleId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle' },
@@ -30,27 +29,28 @@ const valoracionSchema = new mongoose.Schema({
 const Valoracion = mongoose.models.Valoracion || mongoose.model('Valoracion', valoracionSchema);
 
 /* ─────────────────────────────────────────────────────────────────
-   HELPER: buscar precios de mercado usando web_search tool
+   HELPER: buscar precios de mercado con web_search
+   Usa claude-haiku-4-5-20251001 (modelo ligero) para no chocar rate limit
 ───────────────────────────────────────────────────────────────── */
 async function buscarPreciosMercado({ make, model, year, pais }) {
   const paisNorm = pais || 'Venezuela';
 
   const systemSearch = `Eres un analista de precios automotores para ${paisNorm}.
-Debes buscar en páginas de clasificados de vehículos usados (tucarro.com, tucarrito.com, olx.com.ve, mercadolibre.com.ve, encuentra24.com, carros.com, etc.) los precios reales publicados para el vehículo solicitado.
-Regla crítica: OMITE precios que sean más del 40% más baratos que el resto — son probables estafas o errores.
-Responde ÚNICAMENTE con JSON válido, sin texto adicional ni markdown:
+Busca en sitios de clasificados de vehículos usados los precios reales publicados para el vehículo indicado.
+REGLA CRÍTICA: Omite precios que sean más del 40% más baratos que el resto — son probables estafas.
+Responde ÚNICAMENTE con JSON válido, sin texto ni markdown:
 {"precios_encontrados":[numeros],"precio_promedio_filtrado":numero,"rango_estimado":"USD X,XXX – USD X,XXX","fuentes_consultadas":["sitio1","sitio2"],"observacion":"texto breve"}`;
 
   try {
     const searchMsg = await client.messages.create({
-      model: 'claude-opus-4-6',
-      max_tokens: 1000,
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 800,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       tool_choice: { type: 'auto' },
       system: systemSearch,
       messages: [{
         role: 'user',
-        content: `Busca precios de venta actuales del ${year} ${make} ${model} en ${paisNorm}. Consulta sitios de clasificados automotores locales. Filtra posibles estafas (precios demasiado bajos). Dame el promedio real del mercado.`
+        content: `Busca precios de venta actuales del ${year} ${make} ${model} en ${paisNorm}. Consulta clasificados automotores locales. Filtra posibles estafas (precios demasiado bajos).`
       }],
     });
 
@@ -105,23 +105,23 @@ router.post('/', auth, checkUsos, async (req, res) => {
 
     if (!vehicleYear && recorrido?.anio) vehicleYear = String(recorrido.anio);
 
-    /* ── 1. Investigar precios de mercado en tiempo real ── */
+    /* ── 1. Investigar precios de mercado (Haiku — liviano, anti rate-limit) ── */
     let mktData = { precioPromedio: null, rangoEstimado: null, fuentes: [], resumenBusqueda: '', preciosList: [] };
     if (vehicleMake && vehicleModel) {
       mktData = await buscarPreciosMercado({ make: vehicleMake, model: vehicleModel, year: vehicleYear, pais: vehiclePais });
     }
 
     const mercadoContextIA = mktData.precioPromedio
-      ? `\n\n🔍 DATOS REALES DE MERCADO (obtenidos de sitios de clasificados en tiempo real):
-- Precios publicados encontrados: ${mktData.preciosList.map(p => '$' + Number(p).toLocaleString()).join(', ')}
-- Promedio filtrado (descartando posibles estafas): $${Number(mktData.precioPromedio).toLocaleString()}
+      ? `\n\n🔍 DATOS REALES DE MERCADO (clasificados locales en tiempo real):
+- Precios publicados: ${mktData.preciosList.map(p => '$' + Number(p).toLocaleString()).join(', ')}
+- Promedio filtrado (sin estafas): $${Number(mktData.precioPromedio).toLocaleString()}
 - Rango de mercado: ${mktData.rangoEstimado}
 - Fuentes: ${mktData.fuentes.join(', ')}
-- Observación: ${mktData.resumenBusqueda}
+- Nota: ${mktData.resumenBusqueda}
 → Usa estos datos como base para "valorEstimado" y "precioMercadoIA". Ajusta según condición del vehículo.`
       : `\n\nNota: No se obtuvieron precios en línea. Usa tu conocimiento del mercado ${vehiclePais} para estimar.`;
 
-    /* ── 2. Valoración principal ── */
+    /* ── 2. Valoración principal (Opus — análisis experto) ── */
     const systemPrompt = `Eres el Asesor Mecánico IA de HoodAI, experto en valoración vehicular latinoamericana.
 ${vehicleContext}
 ${mercadoContextIA}
@@ -129,64 +129,37 @@ ${mercadoContextIA}
 Responde SOLO con este JSON (sin markdown, sin texto adicional):
 {
   "puntajeTotal": <0-100>,
-  "valorEstimado": "<rango USD basado en datos reales de mercado, ej: $8,500 – $10,200>",
-  "precioMercadoIA": "<precio promedio de mercado calculado con datos reales, ej: $9,350>",
+  "valorEstimado": "<rango USD, ej: $8,500 – $10,200>",
+  "precioMercadoIA": "<precio promedio de mercado calculado, ej: $9,350>",
   "depreciacion": "<ej: 12% anual>",
-  "resumen": "<análisis 3-4 oraciones mencionando los precios investigados y ajuste por condición>",
+  "resumen": "<análisis 3-4 oraciones mencionando precios investigados y ajuste por condición>",
   "categorias": {
     "estadoMecanico":   { "puntaje": <0-100>, "comentario": "<observación>" },
     "estetica":         { "puntaje": <0-100>, "comentario": "<observación>" },
     "recorrido":        { "puntaje": <0-100>, "comentario": "<observación>" },
     "documentacion":    { "puntaje": <0-100>, "comentario": "<observación>" },
-    "mercado":          { "puntaje": <0-100>, "comentario": "<observación basada en precios reales investigados>" }
+    "mercado":          { "puntaje": <0-100>, "comentario": "<observación basada en precios reales>" }
   },
   "recomendaciones": ["<rec1>", "<rec2>", "<rec3>"],
   "alertas": ["<alerta si aplica>"],
   "fuentesPrecio": [${mktData.fuentes.map(f => `"${f}"`).join(', ')}]
 }`;
 
-    const userMessage = `Datos del vehículo para valoración:
+    const userMessage = `Datos del vehículo:
 
-📋 ESTADO MECÁNICO:
-- Motor: ${estadoMecanico?.motor || 'No especificado'}
-- Transmisión: ${estadoMecanico?.transmision || 'No especificado'}
-- Frenos: ${estadoMecanico?.frenos || 'No especificado'}
-- Suspensión: ${estadoMecanico?.suspension || 'No especificado'}
-- Sistema eléctrico: ${estadoMecanico?.electrico || 'No especificado'}
-- Aire acondicionado: ${estadoMecanico?.ac || 'No especificado'}
-- Observaciones: ${estadoMecanico?.observaciones || 'Ninguna'}
+📋 MECÁNICA: Motor: ${estadoMecanico?.motor||'N/E'} | Transmisión: ${estadoMecanico?.transmision||'N/E'} | Frenos: ${estadoMecanico?.frenos||'N/E'} | Suspensión: ${estadoMecanico?.suspension||'N/E'} | Eléctrico: ${estadoMecanico?.electrico||'N/E'} | AC: ${estadoMecanico?.ac||'N/E'} | Obs: ${estadoMecanico?.observaciones||'Ninguna'}
 
-🎨 ESTÉTICA:
-- Pintura: ${estetica?.pintura || 'No especificado'}
-- Golpes: ${estetica?.golpes || 'No especificado'}
-- Interior: ${estetica?.interior || 'No especificado'}
-- Vidrios: ${estetica?.vidrios || 'No especificado'}
-- Llantas: ${estetica?.llantas || 'No especificado'}
-- Observaciones: ${estetica?.observaciones || 'Ninguna'}
+🎨 ESTÉTICA: Pintura: ${estetica?.pintura||'N/E'} | Golpes: ${estetica?.golpes||'N/E'} | Interior: ${estetica?.interior||'N/E'} | Vidrios: ${estetica?.vidrios||'N/E'} | Llantas: ${estetica?.llantas||'N/E'} | Obs: ${estetica?.observaciones||'Ninguna'}
 
-📏 RECORRIDO:
-- Kilómetros: ${recorrido?.km || 'No especificado'} km
-- Año: ${recorrido?.anio || 'No especificado'}
-- Propietarios anteriores: ${recorrido?.propietarios || 'No especificado'}
-- Accidentes: ${recorrido?.accidentes || 'No especificado'}
-- Mantenimiento: ${recorrido?.mantenimiento || 'No especificado'}
+📏 RECORRIDO: ${recorrido?.km||'N/E'} km | Año: ${recorrido?.anio||'N/E'} | Propietarios: ${recorrido?.propietarios||'N/E'} | Accidentes: ${recorrido?.accidentes||'N/E'} | Mantenimiento: ${recorrido?.mantenimiento||'N/E'}
 
-📄 DOCUMENTACIÓN:
-- Título: ${documentacion?.titulo || 'No especificado'}
-- Registro: ${documentacion?.registro || 'No especificado'}
-- Seguro: ${documentacion?.seguro || 'No especificado'}
-- Revisión técnica: ${documentacion?.revision || 'No especificado'}
-- Situación legal: ${documentacion?.situacion || 'Sin observaciones'}
+📄 DOCS: Título: ${documentacion?.titulo||'N/E'} | Registro: ${documentacion?.registro||'N/E'} | Seguro: ${documentacion?.seguro||'N/E'} | Revisión: ${documentacion?.revision||'N/E'} | Legal: ${documentacion?.situacion||'Sin obs'}
 
-📊 MERCADO:
-- Precio pedido por propietario: ${mercado?.precioPedido ? '$' + Number(mercado.precioPedido).toLocaleString() : 'No especificado'}
-- Demanda en zona: ${mercado?.demanda || 'No especificado'}
-- Urgencia de venta: ${mercado?.urgencia || 'No especificado'}
-- Observaciones: ${mercado?.observaciones || 'Ninguna'}`;
+📊 MERCADO: Precio pedido: ${mercado?.precioPedido ? '$'+Number(mercado.precioPedido).toLocaleString() : 'N/E'} | Demanda: ${mercado?.demanda||'N/E'} | Urgencia: ${mercado?.urgencia||'N/E'} | Obs: ${mercado?.observaciones||'Ninguna'}`;
 
     const message = await client.messages.create({
       model: 'claude-opus-4-6',
-      max_tokens: 1500,
+      max_tokens: 1200,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     });
@@ -232,7 +205,7 @@ Responde SOLO con este JSON (sin markdown, sin texto adicional):
   }
 });
 
-// GET /api/valoracion
+/* GET /api/valoracion */
 router.get('/', auth, async (req, res) => {
   try {
     const valoraciones = await Valoracion.find({ userId: req.user._id })
