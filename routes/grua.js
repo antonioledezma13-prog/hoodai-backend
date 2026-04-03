@@ -70,3 +70,80 @@ router.put('/perfil', auth, async (req, res) => {
 });
 
 module.exports = router;
+
+// POST /api/grua/notificar — conductor notifica a grúas disponibles con su GPS + datos
+router.post('/notificar', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'usuario' && req.user.role !== 'taller')
+      return res.status(403).json({ error: 'Solo conductores pueden solicitar grúa' });
+
+    const { lat, lng, descripcion, vehiculo } = req.body;
+
+    // Buscar grúas disponibles
+    const gruas = await User.find({ role: 'grua', disponible: true })
+      .select('_id name businessName phone coverageZone solicitudesGrua');
+
+    if (!gruas.length)
+      return res.status(404).json({ error: 'No hay grúas disponibles en este momento' });
+
+    const solicitud = {
+      clienteId:     req.user._id,
+      clienteNombre: req.user.name || '',
+      clientePhone:  req.user.phone || '',
+      vehiculo:      vehiculo || {},
+      lat:           lat   || null,
+      lng:           lng   || null,
+      descripcion:   descripcion || '',
+      fecha:         new Date(),
+      estado:        'pendiente',
+    };
+
+    // Insertar solicitud en TODAS las grúas disponibles
+    await User.updateMany(
+      { role: 'grua', disponible: true },
+      { $push: { solicitudesGrua: solicitud } }
+    );
+
+    res.json({
+      ok: true,
+      gruasNotificadas: gruas.length,
+      mensaje: `✅ Se notificó a ${gruas.length} grúa${gruas.length > 1 ? 's' : ''} disponible${gruas.length > 1 ? 's' : ''}. Pronto recibirás confirmación.`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/grua/solicitudes — operador de grúa consulta sus solicitudes pendientes
+router.get('/solicitudes', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'grua')
+      return res.status(403).json({ error: 'Solo operadores de grúa' });
+
+    // Recargar el usuario para obtener las solicitudes actualizadas
+    const user = await User.findById(req.user._id).select('solicitudesGrua');
+    const pendientes = (user.solicitudesGrua || [])
+      .filter(s => s.estado === 'pendiente')
+      .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+    res.json(pendientes);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/grua/solicitudes/:solId/aceptar — operador acepta una solicitud
+router.put('/solicitudes/:solId/aceptar', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'grua')
+      return res.status(403).json({ error: 'Solo operadores de grúa' });
+
+    await User.updateOne(
+      { _id: req.user._id, 'solicitudesGrua._id': req.params.solId },
+      { $set: { 'solicitudesGrua.$.estado': 'aceptada' } }
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
