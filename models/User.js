@@ -25,6 +25,15 @@ const userSchema = new mongoose.Schema({
   disponible:    { type: Boolean, default: false },
   // Ensambladora
   marcasVehiculo: [{ type: String }], // marcas que representa
+  // Notificaciones de aceptación que llegan al conductor
+  notificacionesGrua: [{
+    gruaId:       { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    gruaNombre:   { type: String, default: '' },
+    gruaPhone:    { type: String, default: '' },
+    gruaZona:     { type: String, default: '' },
+    fecha:        { type: Date,   default: Date.now },
+    leida:        { type: Boolean, default: false },
+  }],
   // Solicitudes de grúa pendientes (push desde conductores, pull desde operador)
   solicitudesGrua: [{
     clienteId:    { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

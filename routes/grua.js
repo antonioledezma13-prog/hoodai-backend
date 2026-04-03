@@ -138,11 +138,58 @@ router.put('/solicitudes/:solId/aceptar', auth, async (req, res) => {
     if (req.user.role !== 'grua')
       return res.status(403).json({ error: 'Solo operadores de grúa' });
 
-    await User.updateOne(
+    // 1. Marcar la solicitud como aceptada
+    const gruaDoc = await User.findOneAndUpdate(
       { _id: req.user._id, 'solicitudesGrua._id': req.params.solId },
-      { $set: { 'solicitudesGrua.$.estado': 'aceptada' } }
+      { $set: { 'solicitudesGrua.$.estado': 'aceptada' } },
+      { new: true }
     );
+
+    // 2. Encontrar la solicitud para obtener el clienteId
+    const solicitud = gruaDoc?.solicitudesGrua?.find(
+      s => s._id.toString() === req.params.solId
+    );
+
+    // 3. Empujar notificación al documento del cliente
+    if (solicitud?.clienteId) {
+      await User.updateOne(
+        { _id: solicitud.clienteId },
+        {
+          $push: {
+            notificacionesGrua: {
+              gruaId:     req.user._id,
+              gruaNombre: req.user.businessName || req.user.name || 'Operador de Grúa',
+              gruaPhone:  req.user.phone || '',
+              gruaZona:   req.user.coverageZone || '',
+              fecha:      new Date(),
+              leida:      false,
+            }
+          }
+        }
+      );
+    }
+
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/grua/notificaciones — conductor consulta si una grúa aceptó su solicitud
+router.get('/notificaciones', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('notificacionesGrua');
+    const nuevas = (user.notificacionesGrua || []).filter(n => !n.leida);
+
+    // Marcar todas como leídas
+    if (nuevas.length > 0) {
+      await User.updateOne(
+        { _id: req.user._id },
+        { $set: { 'notificacionesGrua.$[].leida': true } }
+      );
+    }
+
+    res.json(nuevas);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
