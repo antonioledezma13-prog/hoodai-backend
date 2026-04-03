@@ -194,3 +194,19 @@ router.get('/notificaciones', auth, async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// PUT /api/grua/solicitudes/:solId/finalizar — operador finaliza el servicio
+router.put('/solicitudes/:solId/finalizar', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'grua')
+      return res.status(403).json({ error: 'Solo operadores de grúa' });
+
+    await User.updateOne(
+      { _id: req.user._id, 'solicitudesGrua._id': req.params.solId },
+      { $set: { 'solicitudesGrua.$.estado': 'cancelada' } } // reutilizamos 'cancelada' = completada
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
