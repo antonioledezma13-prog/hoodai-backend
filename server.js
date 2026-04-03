@@ -16,6 +16,7 @@ const ensambladoraRoutes = require('./routes/ensambladora');
 const valoracionRoutes   = require('./routes/valoracion');
 const ttsRoutes          = require('./routes/tts');
 const obdRoutes          = require('./routes/obd');
+const carbgRoutes        = require('./routes/carbg');
 
 const app = express();
 
@@ -38,6 +39,7 @@ app.use(express.json({ limit: '10mb' }));
 app.get('/', (req, res) => res.json({ status: 'ok', app: 'Hoodai API', version: '3.0.0' }));
 
 app.use('/api/auth',         authRoutes);
+app.use('/api/carbg',        carbgRoutes);
 app.use('/api/vehicle',      vehicleRoutes);
 app.use('/api/analyze',      analyzeRoutes);
 app.use('/api/chat',         chatRoutes);
