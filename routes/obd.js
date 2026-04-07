@@ -95,11 +95,13 @@ function decodeDTC(hexBytes) {
 // ── POST /api/obd/analizar ───────────────────────────────────────────────
 router.post('/analizar', auth, checkUsos, async (req, res) => {
   try {
-    const { vehicleId, lecturas, codigosDTC } = req.body;
-    // lecturas: [{ pid: '010C', hex: '1A F8' }, ...]
-    // codigosDTC: '43 01 33 00 00 ...' (respuesta raw del comando 03)
+    const { vehicleId, lecturas, codigosDTC, lecturasExt, adapterType } = req.body;
+    // lecturas:    [{ pid: '010C', hex: '1A F8' }, ...]  — PIDs estándar ECM
+    // codigosDTC:  '43 01 33 00 00 ...'                  — DTCs activos raw
+    // lecturasExt: [{ nombre, valor, modulo: 'TCM'|'ABS/EPS' }] — módulos extendidos
+    // adapterType: string — tipo de adaptador detectado
 
-    if (!lecturas && !codigosDTC)
+    if (!lecturas && !codigosDTC && !lecturasExt)
       return res.status(400).json({ error: 'Se requieren lecturas OBD o códigos DTC' });
 
     // Obtener contexto del vehículo
@@ -130,17 +132,39 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
       ? `CÓDIGOS DE FALLA (DTC):\n${dtcDecodificados.map(d => `${d.code}: ${d.descripcion}`).join('\n')}`
       : 'Sin códigos de falla activos.';
 
+    // Lecturas de módulos extendidos (TCM, ABS/EPS) — solo hardware avanzado
+    let resumenExt = '';
+    if (Array.isArray(lecturasExt) && lecturasExt.length > 0) {
+      const tcmLines = lecturasExt.filter(l => l.modulo === 'TCM')
+        .map(l => `  ${l.nombre}: ${l.valor}`).join('\n');
+      const absLines = lecturasExt.filter(l => l.modulo === 'ABS/EPS')
+        .map(l => `  ${l.nombre}: ${l.valor}`).join('\n');
+
+      resumenExt = [
+        tcmLines ? `TRANSMISIÓN (TCM):\n${tcmLines}` : '',
+        absLines ? `FRENOS / DIRECCIÓN (ABS/EPS):\n${absLines}` : '',
+      ].filter(Boolean).join('\n\n');
+    }
+
+    // Nota sobre el adaptador usado
+    const adapterNote = adapterType && adapterType !== 'GENERIC_ELM327'
+      ? `Adaptador avanzado detectado: ${adapterType}. Los datos incluyen módulos TCM y ABS/EPS.`
+      : '';
+
     const systemPrompt = `Eres el Asesor Mecánico IA de HoodAI, experto en diagnóstico OBD-II para el mercado latinoamericano.
 Analiza los datos de la computadora del vehículo y explica las fallas en lenguaje simple y amigable.
 ${vehicleContext ? `Vehículo: ${vehicleContext}` : ''}
+${adapterNote}
 FORMATO OBLIGATORIO: Responde SOLO en texto plano. Sin asteriscos, sin guiones, sin negritas, sin markdown de ningún tipo.
-Tono: calmado, pedagógico, como un mecánico de confianza explicándole a un amigo.`;
+Tono: calmado, pedagógico, como un mecánico de confianza explicándole a un amigo.
+Si hay datos de transmisión (TCM) o dirección/frenos (ABS/EPS), inclúyelos en el análisis con la misma claridad.`;
 
     const userMessage = `Analiza estos datos de la computadora del vehículo y dime en lenguaje común qué está pasando, qué tan grave es y qué debo hacer:
 
 ${resumenLecturas}
 
 ${resumenDTC}
+${resumenExt ? '\n' + resumenExt : ''}
 
 Responde SOLO con este JSON sin markdown:
 {
