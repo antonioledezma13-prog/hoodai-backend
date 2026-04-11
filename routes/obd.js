@@ -145,7 +145,11 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
       lecturasExt.forEach(l=>{ const m=l.modulo||'Extendido'; if(!grupos[m])grupos[m]=[]; grupos[m].push(`  ${l.nombre}: ${l.valor}`); });
       resumenSensoresExt = Object.entries(grupos)
         .map(([mod,lines])=>{
-          const label=mod==='TCM'?'TRANSMISIÓN (TCM @ 7E1)':mod==='ABS/EPS'?'FRENOS / DIRECCIÓN ABS/EPS (@ 7E2)':mod==='BCM'?'CARROCERÍA BCM (@ 7E3)':mod;
+          const label=
+            mod==='TCM'    ? 'TRANSMISIÓN (TCM @ 7E1)'          :
+            mod==='ABS/EPS'? 'FRENOS / DIRECCIÓN ABS/EPS (@ 7E2)':
+            mod==='BCM'    ? 'CARROCERÍA BCM (@ 7E3)'            :
+            mod==='SRS'    ? 'AIRBAGS / SEGURIDAD SRS (@ 7E5)'   : mod;
           return `${label}:\n${lines.join('\n')}`;
         }).join('\n\n');
     }
@@ -175,6 +179,7 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
       'Tono: calmado, pedagógico, como un mecánico de confianza.',
       'Si hay datos de transmisión, ABS, EPS o carrocería, inclúyelos en el análisis con la misma claridad.',
       'Cuando haya DTC de múltiples módulos, explica cada sistema afectado por separado en el campo "fallas".',
+      'IMPORTANTE — SRS/AIRBAGS: Si hay fallas en el módulo SRS, márcalas siempre como urgencia "No manejar" y explica claramente que el sistema de protección en accidentes puede estar comprometido. Recomienda taller especializado.',
     ].filter(Boolean).join('\n');
 
     // Freeze Frame — datos capturados en el momento del fallo
