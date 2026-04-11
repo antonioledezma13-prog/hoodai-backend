@@ -103,6 +103,7 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
       lecturasExt,     // [{ nombre, valor, modulo }]
       dtcExtendidos,   // [{ code, descripcion, modulo }] — ya decodificados por el frontend
       adapterType,
+      freezeFrame,     // { dtcDisparador, frameNum, lecturas:[{ pid, nombre, valor, unidad }] }
     } = req.body;
 
     if (!lecturas && !codigosDTC && !lecturasExt && !dtcExtendidos)
@@ -176,7 +177,17 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
       'Cuando haya DTC de múltiples módulos, explica cada sistema afectado por separado en el campo "fallas".',
     ].filter(Boolean).join('\n');
 
-    const bloques = [resumenLecturas, resumenDTC, resumenSensoresExt, resumenDTCExt].filter(Boolean).join('\n\n');
+    // Freeze Frame — datos capturados en el momento del fallo
+    let resumenFreezeFrame = '';
+    if (freezeFrame && Array.isArray(freezeFrame.lecturas) && freezeFrame.lecturas.length > 0) {
+      const lineas = freezeFrame.lecturas.map(l => `  ${l.nombre}: ${l.valor} ${l.unidad}`);
+      resumenFreezeFrame =
+        `FREEZE FRAME — Estado del motor cuando se generó ${freezeFrame.dtcDisparador}:\n` +
+        `(Estos valores son exactamente como estaba el motor en el momento de la falla)\n` +
+        lineas.join('\n');
+    }
+
+    const bloques = [resumenLecturas, resumenDTC, resumenSensoresExt, resumenDTCExt, resumenFreezeFrame].filter(Boolean).join('\n\n');
 
     const userMessage = `Analiza estos datos de la computadora del vehículo y dime en lenguaje común qué está pasando, qué tan grave es y qué debo hacer:\n\n${bloques}\n\nResponde SOLO con este JSON sin markdown:\n{\n  "gravedad": "NORMAL|PRECAUCION|CRITICO",\n  "resumen": "Explicación amigable en 2-3 oraciones sin tecnicismos",\n  "fallas": [\n    { "codigo": "PXXXX|CXXXX|BXXXX", "nombre": "nombre simple", "explicacion": "explicación en palabras simples", "urgencia": "Puede esperar|Ir al taller pronto|No manejar", "modulo": "ECM|TCM|ABS|BODY" }\n  ],\n  "lecturas": [\n    { "nombre": "nombre", "valor": "valor con unidad", "estado": "normal|alerta|critico" }\n  ],\n  "recomendacion": "Qué debe hacer el conductor ahora mismo",\n  "necesita_grua": false\n}`;
 
