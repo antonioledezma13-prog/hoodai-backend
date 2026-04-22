@@ -321,7 +321,7 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
     // Contexto del vehículo
     let vehicleContext='', vehicle=null;
     if (vehicleId) {
-      vehicle = async Vehicle.findOne({ _id:vehicleId, userId:req.user._id });
+      vehicle = await Vehicle.findOne({ _id:vehicleId, userId:req.user._id });
       if (vehicle)
         vehicleContext=`${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.engine?' '+vehicle.engine:''}`;
     }
