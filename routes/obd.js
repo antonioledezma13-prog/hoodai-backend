@@ -100,6 +100,7 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
       lecturas,        // [{ pid, hex }]
       codigosDTC,      // string hex raw — DTCs modo 03
       dtcPendientes,   // string hex raw — DTCs modo 07
+      uCodes,          // string hex raw — UDS 19 02 FF (fallas de red CAN / U-codes)
       lecturasExt,     // [{ nombre, valor, modulo }]
       dtcExtendidos,   // [{ code, descripcion, modulo }] — ya decodificados por el frontend
       adapterType,
@@ -128,6 +129,59 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
     const dtcPendientesDecod = dtcPendientes ? decodeDTC(dtcPendientes) : [];
     const dtcHistorialDecod  = req.body.dtcHistorial ? decodeDTC(req.body.dtcHistorial) : [];
 
+    // ── Decodificar U-codes (fallas de red CAN) ───────────────────────────
+    // U0xxx = pérdida de comunicación entre módulos
+    // Críticos: U0100 (ECM), U0121 (ABS), U0140 (BCM), U0155 (Cuadro), U0164 (HVAC)
+    const U_CODE_MAP = {
+      'U0001':'Bus CAN de alta velocidad — falla de comunicación general',
+      'U0010':'Bus CAN de velocidad media — falla de comunicación',
+      'U0100':'Sin comunicación con ECM/PCM — posible falla de módulo o bus CAN',
+      'U0101':'Sin comunicación con TCM — transmisión sin respuesta en red',
+      'U0114':'Sin comunicación con módulo de tracción en 4 ruedas (4WD/AWD)',
+      'U0121':'Sin comunicación con módulo ABS — sistema de frenos comprometido',
+      'U0122':'Sin comunicación con módulo de control de estabilidad (ESC/VSC)',
+      'U0126':'Sin comunicación con módulo de dirección (EPS/AFS)',
+      'U0131':'Sin comunicación con módulo de dirección asistida eléctrica',
+      'U0140':'Sin comunicación con BCM — carrocería/luces/cierre sin respuesta',
+      'U0141':'Sin comunicación con BCM auxiliar',
+      'U0146':'Sin comunicación con módulo Gateway — pasarela CAN bloqueada',
+      'U0151':'Sin comunicación con módulo SRS — airbags sin respuesta en red',
+      'U0155':'Sin comunicación con cuadro de instrumentos (Cluster)',
+      'U0164':'Sin comunicación con módulo HVAC — climatización sin respuesta',
+      'U0184':'Sin comunicación con módulo de radio/audio',
+      'U0401':'Datos inválidos recibidos del ECM/PCM — señal corrupta en bus',
+      'U0415':'Datos inválidos recibidos del módulo ABS',
+      'U0422':'Datos inválidos recibidos del BCM',
+    };
+
+    const uCodesDecod = [];
+    if (uCodes && uCodes.length > 4) {
+      // Parsear hex UDS 59 02 FF response: byte 3 = num DTCs, luego 4 bytes por DTC
+      const bytes = uCodes.replace(/\s/g,'').match(/.{1,2}/g)||[];
+      // Buscar el patrón de respuesta positiva UDS 59 02
+      const startIdx = bytes.findIndex((b,i) => b.toUpperCase()==='59' && bytes[i+1]?.toUpperCase()==='02');
+      if (startIdx >= 0) {
+        const numDtc = parseInt(bytes[startIdx+3]||'0', 16);
+        for (let i=0; i<numDtc && i<20; i++) {
+          const base = startIdx + 4 + (i*4);
+          if (base+1 < bytes.length) {
+            const hi = parseInt(bytes[base],   16);
+            const lo = parseInt(bytes[base+1], 16);
+            const type = (hi>>6)&0x03;
+            const d1   = (hi>>4)&0x03;
+            const d2   = hi&0x0F;
+            const d34  = lo.toString(16).padStart(2,'0').toUpperCase();
+            const prefix = ['P','C','B','U'][type];
+            const code   = `${prefix}${d1}${d2}${d34}`;
+            const desc   = U_CODE_MAP[code] || `${code} — falla de comunicación en red CAN`;
+            if (prefix === 'U') {
+              uCodesDecod.push({ code, descripcion: desc, modulo: 'RED', urgencia: 'No manejar' });
+            }
+          }
+        }
+      }
+    }
+
     // ── Bloques del prompt ────────────────────────────────────────────────
 
     const resumenLecturas = lecturasTrad.length>0
@@ -137,6 +191,15 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
     const resumenDTC = dtcDecodificados.length>0
       ? `CÓDIGOS DE FALLA ECM (Motor):\n${dtcDecodificados.map(d=>`  ${d.code}: ${d.descripcion}`).join('\n')}`
       : 'Sin códigos de falla activos en ECM.';
+
+    // U-codes en el prompt — sección separada con énfasis crítico
+    let resumenUCodes = '';
+    if (uCodesDecod.length > 0) {
+      resumenUCodes = `FALLAS DE RED CAN (U-codes) — CRÍTICO:\n` +
+        `(Estos códigos indican que módulos clave no se están comunicando entre sí.)\n` +
+        `(Un vehículo con U-codes activos puede no arrancar aunque el ECM no muestre fallas P.)\n` +
+        uCodesDecod.map(u=>`  ${u.code}: ${u.descripcion}`).join('\n');
+    }
 
     // Sensores extendidos agrupados por módulo
     let resumenSensoresExt = '';
@@ -166,23 +229,25 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
         }).join('\n\n');
     }
 
-    const adapterNote = adapterType && adapterType!=='GENERIC_ELM327'
+    const adapterLevel = adapterType && adapterType!=='GENERIC_ELM327'
       ? `Hardware: ${adapterType} — datos incluyen módulos extendidos (TCM, ABS/EPS, BCM).`
-      : '';
+      : 'Hardware: adaptador básico — solo datos ECM/OBD-II disponibles.';
 
     const systemPrompt = [
       'Eres el Asesor Mecánico IA de HoodAI, experto en diagnóstico OBD-II para el mercado latinoamericano.',
       'Analiza los datos de la computadora del vehículo y explica las fallas en lenguaje simple y amigable.',
       vehicleContext?`Vehículo: ${vehicleContext}`:'',
-      adapterNote,
+      adapterLevel,
       'FORMATO OBLIGATORIO: Responde SOLO en texto plano. Sin asteriscos, sin guiones, sin negritas, sin markdown.',
       'Tono: calmado, pedagógico, como un mecánico de confianza.',
       'Si hay datos de transmisión, ABS, EPS o carrocería, inclúyelos en el análisis con la misma claridad.',
       'Cuando haya DTC de múltiples módulos, explica cada sistema afectado por separado en el campo "fallas".',
-      'IMPORTANTE — SRS/AIRBAGS: Si hay fallas en el módulo SRS, márcalas siempre como urgencia "No manejar" y explica claramente que el sistema de protección en accidentes puede estar comprometido. Recomienda taller especializado.',
+      'IMPORTANTE — U-CODES (RED CAN): Si hay fallas U0xxx, son CRÍTICAS. Significan que los módulos no se hablan entre sí. Un vehículo con U-codes puede no arrancar aunque el ECM diga que está bien. Siempre marca gravedad CRITICO y necesita_grua true si hay U-codes activos.',
+      'IMPORTANTE — SRS/AIRBAGS: Si hay fallas en el módulo SRS, márcalas siempre como urgencia "No manejar" y explica que el sistema de protección puede estar comprometido.',
+      'IMPORTANTE — SIN DTC PERO NO ARRANCA: Si el ECM no reporta fallas pero el vehículo tiene síntomas graves, busca U-codes de red, verifica tensión de batería y considera falla de sensor CKP/CMP o relé de combustible.',
     ].filter(Boolean).join('\n');
 
-    // Freeze Frame — datos capturados en el momento del fallo
+    // Freeze Frame
     let resumenFreezeFrame = '';
     if (freezeFrame && Array.isArray(freezeFrame.lecturas) && freezeFrame.lecturas.length > 0) {
       const lineas = freezeFrame.lecturas.map(l => `  ${l.nombre}: ${l.valor} ${l.unidad}`);
@@ -192,9 +257,9 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
         lineas.join('\n');
     }
 
-    const bloques = [resumenLecturas, resumenDTC, resumenSensoresExt, resumenDTCExt, resumenFreezeFrame].filter(Boolean).join('\n\n');
+    const bloques = [resumenLecturas, resumenDTC, resumenUCodes, resumenSensoresExt, resumenDTCExt, resumenFreezeFrame].filter(Boolean).join('\n\n');
 
-    const userMessage = `Analiza estos datos de la computadora del vehículo y dime en lenguaje común qué está pasando, qué tan grave es y qué debo hacer:\n\n${bloques}\n\nResponde SOLO con este JSON sin markdown:\n{\n  "gravedad": "NORMAL|PRECAUCION|CRITICO",\n  "resumen": "Explicación amigable en 2-3 oraciones sin tecnicismos",\n  "fallas": [\n    { "codigo": "PXXXX|CXXXX|BXXXX", "nombre": "nombre simple", "explicacion": "explicación en palabras simples", "urgencia": "Puede esperar|Ir al taller pronto|No manejar", "modulo": "ECM|TCM|ABS|BODY" }\n  ],\n  "lecturas": [\n    { "nombre": "nombre", "valor": "valor con unidad", "estado": "normal|alerta|critico" }\n  ],\n  "recomendacion": "Qué debe hacer el conductor ahora mismo",\n  "necesita_grua": false\n}`;
+    const userMessage = `Analiza estos datos de la computadora del vehículo y dime en lenguaje común qué está pasando, qué tan grave es y qué debo hacer:\n\n${bloques}\n\nResponde SOLO con este JSON sin markdown:\n{\n  "gravedad": "NORMAL|PRECAUCION|CRITICO",\n  "resumen": "Explicación amigable en 2-3 oraciones sin tecnicismos",\n  "fallas": [\n    { "codigo": "PXXXX|UXXXX|CXXXX|BXXXX", "nombre": "nombre simple", "explicacion": "explicación en palabras simples", "urgencia": "Puede esperar|Ir al taller pronto|No manejar", "modulo": "ECM|TCM|ABS|BODY|RED" }\n  ],\n  "lecturas": [\n    { "nombre": "nombre", "valor": "valor con unidad", "estado": "normal|alerta|critico" }\n  ],\n  "recomendacion": "Qué debe hacer el conductor ahora mismo",\n  "necesita_grua": false\n}`;
 
     const message = await client.messages.create({
       model:      'claude-opus-4-6',
@@ -208,11 +273,12 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
     try {
       parsed = JSON.parse(rawText.replace(/```json|```/g,'').trim());
     } catch {
-      const todasFallas=[...dtcDecodificados,...(Array.isArray(dtcExtendidos)?dtcExtendidos:[])];
+      const todasFallas=[...dtcDecodificados,...uCodesDecod,...(Array.isArray(dtcExtendidos)?dtcExtendidos:[])];
       parsed = {
-        gravedad:'PRECAUCION', resumen:rawText,
-        fallas:todasFallas.map(d=>({ codigo:d.code, nombre:d.code, explicacion:d.descripcion, urgencia:'Ir al taller pronto', modulo:d.modulo||'ECM' })),
-        lecturas:[], recomendacion:'Consulta con un mecánico de confianza.', necesita_grua:false,
+        gravedad: uCodesDecod.length>0 ? 'CRITICO' : 'PRECAUCION',
+        resumen:rawText,
+        fallas:todasFallas.map(d=>({ codigo:d.code, nombre:d.code, explicacion:d.descripcion, urgencia: d.modulo==='RED'?'No manejar':'Ir al taller pronto', modulo:d.modulo||'ECM' })),
+        lecturas:[], recomendacion:'Consulta con un mecánico de confianza.', necesita_grua: uCodesDecod.length>0,
       };
     }
 
@@ -238,6 +304,7 @@ router.post('/analizar', auth, checkUsos, async (req, res) => {
       dtcDecodificados,
       dtcPendientesDecod,
       dtcHistorialDecod,
+      uCodesDecod,
       lecturasTrad: (lecturas||[]).map(l=>translatePID(l.pid,l.hex)).filter(Boolean),
       usosRestantes: req.user.usosRestantes + req.user.usosExtra,
     });
